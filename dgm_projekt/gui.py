@@ -4,8 +4,8 @@ import model
 import plotter
 
 def show_window():
-    parameters, gradients = dirac_gan.get_vectors()
-    plotter.plot_vectors(parameters,gradients)
+    vectors = dirac_gan.get_vectors()
+    plotter.plot_vectors(vectors)
 
     points = dirac_gan.train()
     plotter.plot_points(points)
