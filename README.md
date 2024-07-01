@@ -1,4 +1,4 @@
-Implementation of a Dirac GAN
+Implementation of a Dirac GAN for the Deep Generative Models course at the TU Darmstadt.
 
 gui.py contains a simple gui you can combine losses and regularization strategies and get a (non-animated graph) as output
 
