@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch
 import torch.nn.utils
 import losses
+from regularizations import get_regularization
 
 class Discriminator(nn.Module):
     def __init__(self):
@@ -30,12 +31,34 @@ class Model(object):
         self.generator_optimizer = torch.optim.SGD(params= self.generator.parameters(), lr = learning_rate,momentum=0)
         self.discriminator_optimizer = torch.optim.SGD(params= self.discriminator.parameters(), lr = learning_rate,momentum=0)
         self.loss_type = 'GAN'
-        self.regularization_loss = None
+        self.regularization_loss = ''
         self.batch_size = batch_size
         self.iterations = iterations
+        self.n_d = 1
+        self.clamp = 0
+        self.gamma = 0
+        self.instance_noise = False
 
     def set_loss(self,loss_type):
         self.loss_type = loss_type
+        if loss_type in ['WGAN']:
+            self.n_d = 5
+            self.clamp = 0.5
+        else:
+            self.n_d = 1
+            self.clamp = 0
+    
+    def set_regularization_loss(self,regularization_loss):
+        self.regularization_loss = regularization_loss
+        if regularization_loss in ['GP','WGP']:
+            self.gamma = 0.5
+        elif regularization_loss in ['CRGP']:
+            self.gamma = 1
+        else:
+            self.gamma = 0
+            
+    def set_instance_noise(self,instance_noise):
+        self.instance_noise = instance_noise
 
     def get_vectors(self, steps = 10,size = 2):
         
@@ -71,19 +94,28 @@ class Model(object):
                 generator_gradient = self.generator.parameter.grad.item()
 
                 self.generator_optimizer.zero_grad()
-                self.discriminator_optimizer.zero_grad()#reset gradients
+                self.discriminator_optimizer.zero_grad()#reset gradients             
+                
+                real_samples = torch.zeros(1)# create samples (so we can use them for the regularization loss)
+                
+                real_samples.requires_grad = True 
 
-                real_prediction = self.discriminator.forward(torch.FloatTensor([[0] for i in range(self.batch_size)])) #forward propagate discriminator with real function output
+                real_prediction = self.discriminator.forward(torch.FloatTensor(real_samples)) #forward propagate discriminator with real function output
 
                 fake_prediction = self.discriminator.forward(self.generator(1)) #forward propagate discriminator with generated data
 
                 discriminator_loss =  losses.get_loss(fake_prediction,real_prediction,'discriminator',self.loss_type) #discriminator loss
+                              
+                if self.regularization_loss:
+                    discriminator_loss += get_regularization(self.regularization_loss, real_prediction, real_samples, self.gamma) # calculate regularization loss    
 
                 discriminator_loss.backward() #backward propagation to get gradients
+                
 
                 discriminator_gradient = self.discriminator.linear.weight.grad.item()
 
                 gradients.append((generator_gradient, discriminator_gradient))
+                
 
 
         return torch.FloatTensor(locations), torch.FloatTensor(gradients)
@@ -96,37 +128,51 @@ class Model(object):
         """
         real_prediction = 0
         fake_prediction = 0 #initialize variables not to break loss function
+        n_d = self.n_d
 
         self.generator.parameter.data = torch.FloatTensor([[1]]) #set generator weights
-        self.discriminator.linear.weight.data = torch.FloatTensor([[1]])  #set discriminator weights
+        self.discriminator.linear.weight.data = torch.FloatTensor([[-1]])  #set discriminator weights
 
         parameter_history = []
 
         for _ in range(self.iterations):
 
-            self.generator_optimizer.zero_grad()
-            self.discriminator_optimizer.zero_grad() #reset gradients
- 
-            fake_prediction = self.discriminator.forward(self.generator.forward(  self.batch_size )) #forward propagate discriminator with generated data
+            for i in range(n_d):
+                self.generator_optimizer.zero_grad()
+                self.discriminator_optimizer.zero_grad() #reset gradients
+                
+                fake_prediction = self.discriminator.forward(self.generator.forward(  self.batch_size )) #forward propagate discriminator with generated data
 
-            generator_loss = losses.get_loss(fake_prediction,real_prediction,'generator',self.loss_type) #compte generator loss
+                if i == n_d-1:
+                    generator_loss = losses.get_loss(fake_prediction,real_prediction,'generator',self.loss_type) #compte generator loss
 
-            generator_loss.backward() #backward propagate to get gradients
+                    generator_loss.backward() #backward propagate to get gradients
 
-            self.generator_optimizer.step() #walk in gradient direction
- 
-            self.generator_optimizer.zero_grad()
-            self.discriminator_optimizer.zero_grad()#reset gradietns
+                    self.generator_optimizer.step() #walk in gradient direction
+        
+                    self.generator_optimizer.zero_grad()
+                self.discriminator_optimizer.zero_grad()#reset gradietns
 
-            real_prediction = self.discriminator.forward(torch.FloatTensor([[0]for i in range(self.batch_size)])) #forward propagate samples from real function
+                real_samples = torch.zeros(1)# create samples (so we can use them for the regularization loss)
+                
+                if self.instance_noise:
+                    real_samples += torch.normal(mean=0, std=0.5, size=(1)) # add instance noise
 
-            fake_prediction = self.discriminator.forward(self.generator.forward(self.batch_size)) #forward propagate discriminator with generated data
+                real_samples.requires_grad = True 
+                
+                real_prediction = self.discriminator.forward(torch.FloatTensor(real_samples)) #forward propagate samples from real function
+                fake_prediction = self.discriminator.forward(self.generator.forward(self.batch_size)) #forward propagate discriminator with generated data
 
-            discriminator_loss =  losses.get_loss(fake_prediction,real_prediction,'discriminator',self.loss_type) #compute discriminator loss
+                discriminator_loss =  losses.get_loss(fake_prediction,real_prediction,'discriminator',self.loss_type) #compute discriminator loss
+                
+                if self.regularization_loss:
+                    discriminator_loss += get_regularization(self.regularization_loss, real_prediction, real_samples, self.gamma) # calculate regularization loss    
+                    
+                discriminator_loss.backward()#backward propagate to get gradients
 
-            discriminator_loss.backward()#backward propagate to get gradients
-
-            self.discriminator_optimizer.step()#take a step into gradient direction
+                self.discriminator_optimizer.step()#take a step into gradient direction
+                if self.clamp != 0 and self.regularization_loss != 'WGP':
+                    self.discriminator.linear.weight.data = self.discriminator.linear.weight.data.clamp_(-self.clamp,self.clamp)
 
             parameter_history.append((self.generator.parameter.data.item(),
                                       self.discriminator.linear.weight.data.item()))
