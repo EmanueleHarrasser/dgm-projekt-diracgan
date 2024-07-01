@@ -87,7 +87,7 @@ def get_update(sources, frames):
         frame += 1 
     return update 
 
-grid = gridplot(plots, ncols=2, width=400, height=400, toolbar_options=dict(logo=None))
+grid = gridplot(plots, ncols=3, width=300, height=300, toolbar_options=dict(logo=None))
 
-curdoc().add_periodic_callback(get_update(sources, 1000), 50)
+curdoc().add_periodic_callback(get_update(sources, 1000), 30)
 curdoc().add_root(grid)
