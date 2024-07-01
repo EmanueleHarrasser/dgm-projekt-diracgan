@@ -19,7 +19,7 @@ class Generator(nn.Module):
         self.parameter = nn.Parameter(torch.ones(1, 1))
 
     def forward(self,repeats):
-        return torch.repeat_interleave(self.parameter, repeats= repeats ,dim=0)
+        return -torch.repeat_interleave(self.parameter, repeats= repeats ,dim=0)
     
 
 
@@ -126,12 +126,14 @@ class Model(object):
         :param instance_noise: (bool) If true instance noise is utilized
         :param (torch.Tensor) History of generator and discriminator parameters [training iterations, 2 (gen., dis.)]
         """
+        ret1 = []
+        ret2 = []
         real_prediction = 0
         fake_prediction = 0 #initialize variables not to break loss function
         n_d = self.n_d
 
         self.generator.parameter.data = torch.FloatTensor([[1]]) #set generator weights
-        self.discriminator.linear.weight.data = torch.FloatTensor([[-1]])  #set discriminator weights
+        self.discriminator.linear.weight.data = torch.FloatTensor([[1]])  #set discriminator weights
 
         parameter_history = []
 
@@ -151,18 +153,18 @@ class Model(object):
                     self.generator_optimizer.step() #walk in gradient direction
         
                     self.generator_optimizer.zero_grad()
-                self.discriminator_optimizer.zero_grad()#reset gradietns
+                self.discriminator_optimizer.zero_grad()#reset gradients
 
                 real_samples = torch.zeros(1)# create samples (so we can use them for the regularization loss)
                 
                 if self.instance_noise:
-                    real_samples += torch.normal(mean=0, std=0.5, size=(1)) # add instance noise
+                    real_samples += torch.normal(mean=0., std=0.5, size=tuple([1])) # add instance noise
 
                 real_samples.requires_grad = True 
                 
                 real_prediction = self.discriminator.forward(torch.FloatTensor(real_samples)) #forward propagate samples from real function
                 fake_prediction = self.discriminator.forward(self.generator.forward(self.batch_size)) #forward propagate discriminator with generated data
-
+                
                 discriminator_loss =  losses.get_loss(fake_prediction,real_prediction,'discriminator',self.loss_type) #compute discriminator loss
                 
                 if self.regularization_loss:
@@ -176,8 +178,9 @@ class Model(object):
 
             parameter_history.append((self.generator.parameter.data.item(),
                                       self.discriminator.linear.weight.data.item()))
-            
-        return torch.tensor(parameter_history)
+            ret1.append(self.generator.parameter.data.item())
+            ret2.append(self.discriminator.linear.weight.data.item())
+        return ret1, ret2
 
     
     
