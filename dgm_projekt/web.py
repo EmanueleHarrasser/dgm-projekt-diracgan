@@ -36,6 +36,18 @@ gp.set_regularization_loss('GP')
 crgp = model.Model()
 crgp.set_regularization_loss('CRGP')
 
+# DRAGAN:
+dragan = model.Model()
+dragan.set_regularization_loss('DRAGAN')
+dragan.set_instance_noise(True)
+
+# Simple LeCam_Regularization:
+simple_lecam_reg = model.Model()
+simple_lecam_reg.set_regularization_loss('SimpleLeCam')
+
+# LeCam as in paper: "Regularizing Generative Adversarial Networks under Limited Data"
+lecam_reg = model.Model()
+lecam_reg.set_regularization_loss('LeCam')
 
 
 training_algorithms = [
@@ -45,7 +57,10 @@ training_algorithms = [
     (wgan_gp, "Wasserstein GAN with GP"),
     (igp, "Instance Noise GAN"),
     (gp, "GAN with Gradient Penalty"),
-    (crgp, "Critically Penalized GAN")
+    (crgp, "Critically Penalized GAN"),
+    (dragan, "DRAGAN Gradient Penalty"),
+    (simple_lecam_reg, "LeCam-Distance as regularization"),
+    (lecam_reg, "lecamgan")
 ]
 
 quiver_locs_theta = np.linspace(-2, 2, 15)
@@ -88,7 +103,7 @@ def get_update(sources, frames):
         frame += 1 
     return update 
 
-grid = gridplot(plots, ncols=3, width=300, height=300, toolbar_options=dict(logo=None))
+grid = gridplot(plots, ncols=4, width=300, height=300, toolbar_options=dict(logo=None))
 
 curdoc().add_periodic_callback(get_update(sources, 1000), 30)
 curdoc().add_root(grid)
