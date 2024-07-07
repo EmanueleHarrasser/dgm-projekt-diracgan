@@ -142,7 +142,7 @@ class Model(object):
                     generator_loss = losses.get_loss(gen_pred,real_pred,'generator',self.loss_type) #compte generator loss
                     print(generator_loss)
                     if self.random_parameter_reset == True:
-                        if random.randrange(0,1000) > 700:
+                        if random.randrange(0,1000) > self.parameter_reset_probability*1000:
                             generator_loss = generator_loss * 0
                     generator_loss.backward() #backward propagate to get gradients
                     self.generator_optimizer.step() #walk in gradient direction
