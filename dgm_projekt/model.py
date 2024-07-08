@@ -43,28 +43,6 @@ class EMA:
     def reset(self):
         self.ema = None
         self.num_updates = 0
-class EMA:
-    def __init__(self, decay):
-        self.decay = decay
-        self.ema = None
-        self.num_updates = 0
-
-    def update(self, value):
-        if self.ema is None:
-            self.ema = value.clone()
-        else:
-            self.ema = self.decay * self.ema + (1.0 - self.decay) * value
-        self.num_updates += 1
-
-    def get_ema(self):
-        if self.ema is None:
-            return None
-        debias_factor = 1 - self.decay ** self.num_updates
-        return self.ema / debias_factor
-
-    def reset(self):
-        self.ema = None
-        self.num_updates = 0
 
 
 class Model(object):
@@ -105,8 +83,6 @@ class Model(object):
             self.gamma = 1
         elif regularization_loss != '':
             self.gamma = 0.5
-        elif regularization_loss in ['CRGP']:
-            self.gamma = 1
         else:
             self.gamma = 0
         
@@ -131,6 +107,10 @@ class Model(object):
         X, Y = np.meshgrid(generator_parameters, discriminator_parameters) # gen: theta, dis: psi 
         U = np.zeros_like(X, dtype=float)
         V = np.zeros_like(Y, dtype=float)
+
+        if self.regularization_loss == 'LeCam':
+            self.ema_real.reset()
+            self.ema_gen.reset()
 
         for i in range(X.shape[0]):
             for j in range(X.shape[1]):
@@ -158,8 +138,20 @@ class Model(object):
 
                 discriminator_loss =  losses.get_loss(gen_pred,real_pred,'discriminator',self.loss_type) #discriminator loss
                               
+                if self.regularization_loss == 'LeCam':
+                    self.ema_gen.update(gen_pred)
+                    self.ema_real.update(real_pred)
+                    ema_fake = self.ema_gen.get_ema().detach()
+                    ema_real = self.ema_real.get_ema().detach()
+                
                 if self.regularization_loss:
-                    discriminator_loss += get_regularization(self.regularization_loss, real_pred, real_samples, self.gamma) # calculate regularization loss    
+                    if self.regularization_loss == 'SimpleLeCam':
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, gen_pred, self.gamma)
+                    elif self.regularization_loss == 'LeCam':
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, gen_pred, self.gamma, ema_fake=ema_fake, ema_real=ema_real)
+                    else:
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, real_samples, self.gamma) # calculate regularization loss    
+                    discriminator_loss += regularization_term   
 
                 discriminator_loss.backward() #backward propagation to get gradients
 
@@ -211,9 +203,22 @@ class Model(object):
                 gen_pred = self.discriminator.forward(self.generator.forward()) #forward propagate discriminator with generated data
                 
                 discriminator_loss =  losses.get_loss(gen_pred,real_pred,'discriminator',self.loss_type) #compute discriminator loss
+
+                if self.regularization_loss == 'LeCam':
+                    self.ema_gen.update(gen_pred)
+                    self.ema_real.update(real_pred)
+                    ema_fake = self.ema_gen.get_ema().detach()
+                    ema_real = self.ema_real.get_ema().detach()
                 
                 if self.regularization_loss:
-                    discriminator_loss += get_regularization(self.regularization_loss, real_pred, real_samples, self.gamma) # calculate regularization loss    
+                    if self.regularization_loss == 'SimpleLeCam':
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, gen_pred, self.gamma)
+                    elif self.regularization_loss == 'LeCam':
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, gen_pred, self.gamma, ema_fake=ema_fake, ema_real=ema_real)
+                        #print(regularization_term)
+                    else:
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, real_samples, self.gamma) # calculate regularization loss    
+                    discriminator_loss += regularization_term
                     
                 discriminator_loss.backward()#backward propagate to get gradients
 
