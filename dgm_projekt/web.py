@@ -53,6 +53,18 @@ def train():
     crgp = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
     crgp.set_regularization_loss('CRGP')
 
+    # DRAGAN:
+    dragan = model.Model()
+    dragan.set_regularization_loss('DRAGAN')
+    dragan.set_instance_noise(True)
+
+    # Simple LeCam_Regularization:
+    simple_lecam_reg = model.Model()
+    simple_lecam_reg.set_regularization_loss('SimpleLeCam')
+
+    # LeCam as in paper: "Regularizing Generative Adversarial Networks under Limited Data"
+    lecam_reg = model.Model()
+    lecam_reg.set_regularization_loss('LeCam')
 
     training_algorithms = [
         (gan, "Standard GAN"),
@@ -61,9 +73,12 @@ def train():
         (wgan_gp, "Wasserstein GAN with GP"),
         (igp, "Instance Noise GAN"),
         (gp, "GAN with Gradient Penalty"),
-        (crgp, "Critically Penalized GAN")
+        (crgp, "Critically Penalized GAN"),
+        (dragan, "DRAGAN Gradient Penalty"),
+        (simple_lecam_reg, "LeCam-Distance as regularization"),
+        (lecam_reg, "lecamgan")
     ]
-
+    
     plots = []
     sources = {}
     start_sources = []
@@ -100,7 +115,6 @@ def train():
             source_start.stream(dict(x=[config["init_theta"]], y=[config["init_psi"]]), rollover=1)
         else:
             source_start.stream(dict(x=[config["init_theta"]], y=[config["init_psi"]]), rollover=1)
-
 
         sources[name] = (source, thetas, psis)
         start_sources.append(source_start)

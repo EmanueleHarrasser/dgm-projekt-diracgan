@@ -20,7 +20,51 @@ class Generator(nn.Module):
 
     def forward(self):
         return -self.parameter
-    
+
+class EMA:
+    def __init__(self, decay):
+        self.decay = decay
+        self.ema = None
+        self.num_updates = 0
+
+    def update(self, value):
+        if self.ema is None:
+            self.ema = value.clone()
+        else:
+            self.ema = self.decay * self.ema + (1.0 - self.decay) * value
+        self.num_updates += 1
+
+    def get_ema(self):
+        if self.ema is None:
+            return None
+        debias_factor = 1 - self.decay ** self.num_updates
+        return self.ema / debias_factor
+
+    def reset(self):
+        self.ema = None
+        self.num_updates = 0
+class EMA:
+    def __init__(self, decay):
+        self.decay = decay
+        self.ema = None
+        self.num_updates = 0
+
+    def update(self, value):
+        if self.ema is None:
+            self.ema = value.clone()
+        else:
+            self.ema = self.decay * self.ema + (1.0 - self.decay) * value
+        self.num_updates += 1
+
+    def get_ema(self):
+        if self.ema is None:
+            return None
+        debias_factor = 1 - self.decay ** self.num_updates
+        return self.ema / debias_factor
+
+    def reset(self):
+        self.ema = None
+        self.num_updates = 0
 
 
 class Model(object):
@@ -36,6 +80,9 @@ class Model(object):
         self.clamp = 0
         self.gamma = 0
         self.instance_noise = False
+        self.moving_average = False
+        self.ema_gen = None
+        self.ema_real = None
 
     def reset_gradients(self):
         self.generator.zero_grad()
@@ -52,12 +99,24 @@ class Model(object):
     
     def set_regularization_loss(self, regularization_loss):
         self.regularization_loss = regularization_loss
-        if regularization_loss in ['GP','WGP']:
+        
+        # set gamma
+        if regularization_loss in ['CRGP']:
+            self.gamma = 1
+        elif regularization_loss != '':
             self.gamma = 0.5
         elif regularization_loss in ['CRGP']:
             self.gamma = 1
         else:
             self.gamma = 0
+        
+        # Turn on moving average if needed
+        if regularization_loss in ['LeCam']:
+            self.ema_gen = EMA(0.99)
+            self.ema_real = EMA(0.99)
+        else:
+            self.ema_gen = None
+            self.ema_real = None
             
     def set_instance_noise(self,instance_noise):
         self.instance_noise = instance_noise
