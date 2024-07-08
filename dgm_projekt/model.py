@@ -3,6 +3,7 @@ import torch
 import torch.nn.utils
 import losses
 from regularizations import get_regularization
+import numpy as np 
 
 class Discriminator(nn.Module):
     def __init__(self):
@@ -23,8 +24,7 @@ class Generator(nn.Module):
 
 
 class Model(object):
-    def __init__(self ,iterations = 1000, learning_rate = .05):
-
+    def __init__(self, iterations = 1000, learning_rate = 0.05):
         self.generator = Generator()
         self.discriminator = Discriminator()
         self.generator_optimizer = torch.optim.SGD(params= self.generator.parameters(), lr = learning_rate)
@@ -50,7 +50,7 @@ class Model(object):
             self.n_d = 1
             self.clamp = 0
     
-    def set_regularization_loss(self,regularization_loss):
+    def set_regularization_loss(self, regularization_loss):
         self.regularization_loss = regularization_loss
         if regularization_loss in ['GP','WGP']:
             self.gamma = 0.5
@@ -62,26 +62,23 @@ class Model(object):
     def set_instance_noise(self,instance_noise):
         self.instance_noise = instance_noise
 
-    def get_vectors(self, steps = 10,size = 2):
-        
+    def get_vectors(self, interval=(-2, 2), steps=10):
         real_pred = 0 
         gen_pred = 0 #initialize variables not to break loss function
 
-        vectors = []
-        
-        generator_parameters = torch.linspace(start=-2, end=2, steps=steps)     #x coordinates
-        discriminator_parameters = torch.linspace(start=-2, end=2, steps=steps) #y coordinates
+        generator_parameters = torch.linspace(start=interval[0], end=interval[1], steps=steps)     #x coordinates
+        discriminator_parameters = torch.linspace(start=interval[0], end=interval[1], steps=steps) #y coordinates      
 
-        
+        X, Y = np.meshgrid(generator_parameters, discriminator_parameters) # gen: theta, dis: psi 
+        U = np.zeros_like(X, dtype=float)
+        V = np.zeros_like(Y, dtype=float)
 
-        for generator_parameter in generator_parameters:
-            for discriminator_parameter in discriminator_parameters:
-                #print(generator_parameter,discriminator_parameter)
-
+        for i in range(X.shape[0]):
+            for j in range(X.shape[1]):
                 self.reset_gradients()
 
-                self.generator.parameter.data = torch.FloatTensor([[generator_parameter]]) 
-                self.discriminator.linear.weight.data = torch.FloatTensor([[discriminator_parameter]])
+                self.generator.parameter.data = torch.FloatTensor([[X[i, j]]]) 
+                self.discriminator.linear.weight.data = torch.FloatTensor([[Y[i, j]]])
 
                 gen_pred =  self.discriminator.forward(self.generator.forward()) #forward propagate discriminator with generated data
 
@@ -106,17 +103,15 @@ class Model(object):
                     discriminator_loss += get_regularization(self.regularization_loss, real_pred, real_samples, self.gamma) # calculate regularization loss    
 
                 discriminator_loss.backward() #backward propagation to get gradients
-                
 
                 discriminator_gradient = self.discriminator.linear.weight.grad.item()
 
-                vectors.append((generator_parameter,discriminator_parameter,generator_gradient, discriminator_gradient))
+                U[i, j] = -generator_gradient * self.generator_optimizer.param_groups[-1]["lr"]
+                V[i, j] = -discriminator_gradient * self.discriminator_optimizer.param_groups[-1]["lr"]
                 
+        return X, Y, U, V
 
-
-        return torch.FloatTensor(vectors)
-
-    def train(self):
+    def train(self, init_theta=1, init_psi=1):
 
         ret1 = []
         ret2 = []
@@ -124,8 +119,8 @@ class Model(object):
         gen_pred = 0 #initialize variables not to break loss function
         n_d = self.n_d
 
-        self.generator.parameter.data = torch.FloatTensor([[1]]) #set generator weights
-        self.discriminator.linear.weight.data = torch.FloatTensor([[1]])  #set discriminator weights
+        self.generator.parameter.data = torch.FloatTensor([[init_theta]]) #set generator weights
+        self.discriminator.linear.weight.data = torch.FloatTensor([[init_psi]])  #set discriminator weights
 
         parameter_history = []
 
