@@ -1,7 +1,24 @@
+# Dirac GAN Implementation
+
 Implementation of a Dirac GAN for the Deep Generative Models course at the TU Darmstadt.
 
-gui.py contains a simple gui you can combine losses and regularization strategies and get a (non-animated graph) as output
+## Overview
 
-web.py contains a bokeh implementation of animated graphs of: 1: Standard GAN 2: Non-saturating GAN 3: Wasserstein GAN 4: WGAN-GP 5: GAN with Instance Noise 6: GAN with Gradient Penalty 7: Gan with Gradient Penalty and critical gamma
+**`gui.py`** contains a simple GUI you can combine losses and regularization strategies and get a (non-animated graph) as output.
 
-to run web.py execute: bokeh serve --show web.py
+**`web.py`** contains a Bokeh implementation of animated graphs of:
+1. Standard GAN
+2. Non-saturating GAN
+3. Wasserstein GAN
+4. WGAN-GP
+5. GAN with Instance Noise
+6. GAN with Gradient Penalty
+7. GAN with Gradient Penalty and critical gamma
+
+## Usage
+
+To run `web.py`, execute:
+
+```bash
+bokeh serve --show web.py
+```

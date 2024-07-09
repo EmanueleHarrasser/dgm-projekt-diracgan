@@ -4,6 +4,7 @@ import torch.nn.utils
 import losses
 from regularizations import get_regularization
 import numpy as np 
+import random
 
 class Discriminator(nn.Module):
     def __init__(self):
@@ -46,7 +47,7 @@ class EMA:
 
 
 class Model(object):
-    def __init__(self, iterations = 1000, learning_rate = 0.05):
+    def __init__(self, iterations = 1000, learning_rate = 0.05, parameter_reset_probability = 0.7):
         self.generator = Generator()
         self.discriminator = Discriminator()
         self.generator_optimizer = torch.optim.SGD(params= self.generator.parameters(), lr = learning_rate)
@@ -61,11 +62,16 @@ class Model(object):
         self.moving_average = False
         self.ema_gen = None
         self.ema_real = None
+        self.random_parameter_reset = False
+        self.parameter_reset_probability = parameter_reset_probability
+
 
     def reset_gradients(self):
-        self.generator.zero_grad()
-        self.discriminator.zero_grad()
+        self.generator_optimizer.zero_grad()
+        self.discriminator_optimizer.zero_grad()
     
+    def set_parameter_reset(self,parameter_reset):
+        self.random_parameter_reset = parameter_reset
     def set_loss(self,loss_type):
         self.loss_type = loss_type
         if loss_type in ['WGAN']:
@@ -77,15 +83,14 @@ class Model(object):
     
     def set_regularization_loss(self, regularization_loss):
         self.regularization_loss = regularization_loss
-        
-        # set gamma
+
         if regularization_loss in ['CRGP']:
-            self.gamma = 1
+            self.gamma = 1 
         elif regularization_loss != '':
-            self.gamma = 0.5
+            self.gamma = 0.5 
         else:
             self.gamma = 0
-        
+
         # Turn on moving average if needed
         if regularization_loss in ['LeCam']:
             self.ema_gen = EMA(0.99)
@@ -150,7 +155,7 @@ class Model(object):
                     elif self.regularization_loss == 'LeCam':
                         regularization_term = get_regularization(self.regularization_loss, real_pred, gen_pred, self.gamma, ema_fake=ema_fake, ema_real=ema_real)
                     else:
-                        regularization_term = get_regularization(self.regularization_loss, real_pred, real_samples, self.gamma) # calculate regularization loss    
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, real_samples,self.gamma,discriminator_loss,self.generator.parameter,self.discriminator.linear.weight) # calculate regularization loss    
                     discriminator_loss += regularization_term   
 
                 discriminator_loss.backward() #backward propagation to get gradients
@@ -185,6 +190,9 @@ class Model(object):
                 if i == n_d-1:
                     generator_loss = losses.get_loss(gen_pred,real_pred,'generator',self.loss_type) #compte generator loss
 
+                    if self.random_parameter_reset == True:
+                        if random.randrange(0,1000) > self.parameter_reset_probability*1000:
+                            generator_loss = generator_loss * 0
                     generator_loss.backward() #backward propagate to get gradients
 
                     self.generator_optimizer.step() #walk in gradient direction
@@ -204,6 +212,10 @@ class Model(object):
                 
                 discriminator_loss =  losses.get_loss(gen_pred,real_pred,'discriminator',self.loss_type) #compute discriminator loss
 
+                if self.random_parameter_reset == True:
+                        if random.randrange(0,1000) > self.parameter_reset_probability*1000 :
+                            discriminator_loss = discriminator_loss * 0
+
                 if self.regularization_loss == 'LeCam':
                     self.ema_gen.update(gen_pred)
                     self.ema_real.update(real_pred)
@@ -217,7 +229,7 @@ class Model(object):
                         regularization_term = get_regularization(self.regularization_loss, real_pred, gen_pred, self.gamma, ema_fake=ema_fake, ema_real=ema_real)
                         #print(regularization_term)
                     else:
-                        regularization_term = get_regularization(self.regularization_loss, real_pred, real_samples, self.gamma) # calculate regularization loss    
+                        regularization_term = get_regularization(self.regularization_loss, real_pred, real_samples,self.gamma,discriminator_loss,self.generator.parameter,self.discriminator.linear.weight) # calculate regularization loss    
                     discriminator_loss += regularization_term
                     
                 discriminator_loss.backward()#backward propagate to get gradients

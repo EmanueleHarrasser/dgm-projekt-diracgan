@@ -14,9 +14,9 @@ def get_loss(fake,real,mode,type):
 
 def GAN_loss(fake,real,mode):
     if mode == 'discriminator':
-        return nn.functional.softplus(- real)  + nn.functional.softplus(fake)
+        return nn.functional.softplus(- real)  + nn.functional.softplus(fake) #difference between real and fake prediction
     if mode == 'generator':
-        return - nn.functional.softplus(fake)
+        return - nn.functional.softplus(fake) #generated 
 
 def NGAN_loss(fake,real,mode):
     if mode == 'discriminator':

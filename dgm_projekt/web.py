@@ -53,6 +53,10 @@ def train():
     crgp = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
     crgp.set_regularization_loss('CRGP')
 
+    # CO:
+    co = model.Model()
+    co.set_regularization_loss('CO')
+
     # DRAGAN:
     dragan = model.Model()
     dragan.set_regularization_loss('DRAGAN')
@@ -74,6 +78,7 @@ def train():
         (igp, "Instance Noise GAN"),
         (gp, "GAN with Gradient Penalty"),
         (crgp, "Critically Penalized GAN"),
+        (co,"Consensus Optimization"),
         (dragan, "DRAGAN Gradient Penalty"),
         (simple_lecam_reg, "LeCam-Distance as regularization"),
         (lecam_reg, "lecamgan")
