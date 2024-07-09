@@ -72,11 +72,11 @@ class Model(object):
     
     def set_parameter_reset(self,parameter_reset):
         self.random_parameter_reset = parameter_reset
-    def set_loss(self,loss_type):
+    def set_loss(self,loss_type, clamp=0.5):
         self.loss_type = loss_type
         if loss_type in ['WGAN']:
             self.n_d = 5
-            self.clamp = 0.5
+            self.clamp = clamp
         else:
             self.n_d = 1
             self.clamp = 0

@@ -2,7 +2,7 @@ import model
 import numpy as np
 from bokeh.plotting import figure, curdoc
 from bokeh.layouts import gridplot, column, row
-from bokeh.models import ColumnDataSource, Button, Arrow, NormalHead, Div, Range1d, Spinner
+from bokeh.models import ColumnDataSource, Button, Arrow, NormalHead, Div, Range1d, Spinner, Spacer, Patch
 from bokeh.events import ButtonClick
 
 config = {
@@ -11,7 +11,10 @@ config = {
     "init_theta": 1,
     "init_psi": 1,
     "plot_interval": (-2, 2),
-    "update_interval": 50 
+    "update_interval": 50,
+    "gan_params": {
+        "wgan_clip": 0.5 
+    }
 }
 
 def quiver(self, X, Y, U, V, color, alpha=1):
@@ -34,7 +37,7 @@ def train():
 
     # WGAN:
     wgan = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
-    wgan.set_loss('WGAN')
+    wgan.set_loss('WGAN', config["gan_params"]["wgan_clip"])
 
     # WGAN-GP:
     wgan_gp = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
@@ -86,9 +89,14 @@ def train():
     
     plots = []
     sources = {}
-    start_sources = []
+    start_sources = {}
     for gan_model, name in training_algorithms:
-        thetas, psis = gan_model.train(init_theta=config["init_theta"], init_psi=config["init_psi"])
+        init_theta = config["init_theta"]
+        init_psi = config["init_psi"]
+        if name == "Wasserstein GAN": 
+            clip = config["gan_params"]["wgan_clip"]
+            init_psi = np.clip(init_psi, -clip, clip).item()
+        thetas, psis = gan_model.train(init_theta=init_theta, init_psi=init_psi)
         X, Y, U, V = gan_model.get_vectors(interval=config["plot_interval"], steps=15)
         rmin, rmax = config["plot_interval"]
         x_range = Range1d(rmin, rmax, bounds=(rmin, rmax))
@@ -117,12 +125,12 @@ def train():
             y_shade2 = [-clamp, -clamp, rmin, rmin]
             p.patch(x_shade2, y_shade2, color="grey", alpha=0.5, line_width=0)
 
-            source_start.stream(dict(x=[config["init_theta"]], y=[config["init_psi"]]), rollover=1)
+            source_start.stream(dict(x=[init_theta], y=[init_psi]), rollover=1)
         else:
-            source_start.stream(dict(x=[config["init_theta"]], y=[config["init_psi"]]), rollover=1)
+            source_start.stream(dict(x=[init_theta], y=[init_psi]), rollover=1)
 
         sources[name] = (source, thetas, psis)
-        start_sources.append(source_start)
+        start_sources[name] = source_start
         plots.append(p) 
 
     return plots, sources, start_sources
@@ -139,8 +147,13 @@ def ui(plots, sources, start_sources):
                 reset = True 
                 frame = 0 
                 
-            for source in start_sources:
-                source.stream(dict(x=[config["init_theta"]], y=[config["init_psi"]]), rollover=1)
+            for name, source in start_sources.items():
+                init_theta = config["init_theta"]
+                init_psi = config["init_psi"]
+                if name == "Wasserstein GAN":
+                    clip = config["gan_params"]["wgan_clip"]
+                    init_psi = np.clip(init_psi, -clip, clip).item()
+                source.stream(dict(x=[init_theta], y=[init_psi]), rollover=1)
 
             for source, thetas, psis in sources.values():
                 if reset:
@@ -198,6 +211,7 @@ def ui(plots, sources, start_sources):
     rmin, rmax = config["plot_interval"]
     spinner_start_x = Spinner(title="Initial θ", low=rmin, high=rmax, step=0.01, value=config["init_theta"])
     spinner_start_y = Spinner(title="Initital Ψ", low=rmin, high=rmax, step=0.01, value=config["init_psi"])
+    spinner_wgan_clip = Spinner(title="WGAN Clip", low=rmin, high=rmax, step=0.01, value=config["gan_params"]["wgan_clip"])
 
     def retrain(): 
         def retrain_action(_):
@@ -205,17 +219,24 @@ def ui(plots, sources, start_sources):
             config["epochs"] = spinner_epochs.value 
             config["learning_rate"] = spinner_lr.value 
             config["init_theta"] = spinner_start_x.value             
-            config["init_psi"] = spinner_start_y.value             
+            config["init_psi"] = spinner_start_y.value     
+            config["gan_params"]["wgan_clip"] = spinner_wgan_clip.value 
             _, new_sources, _ = train() 
             for name, _ in sources.items():
                 sources[name] = (sources[name][0], new_sources[name][1], new_sources[name][2])
             reset(sources)(_) 
+
         return retrain_action
     
     retrain_button.on_event(ButtonClick, retrain()) 
-    param_buttons = column(column(row(spinner_epochs, spinner_lr), row(spinner_start_x, spinner_start_y)), retrain_button) 
+    param_buttons = column(column(row(spinner_epochs, spinner_lr), 
+                                  row(spinner_start_x, spinner_start_y)),
+                                  row(spinner_wgan_clip), 
+                                  retrain_button) 
 
-    layout = column(header, grid, anim_controls, anim_buttons, param_controls, param_buttons, footer)
+    all_controls = column(anim_controls, anim_buttons, param_controls, param_buttons) 
+
+    layout = column(header, row(grid, Spacer(width=25), all_controls), footer)
     return layout 
 
 def setup():
