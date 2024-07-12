@@ -20,5 +20,5 @@ Implementation of a Dirac GAN for the Deep Generative Models course at the TU Da
 To run `web.py`, execute:
 
 ```bash
-bokeh serve --show web.py
+python web.py
 ```
