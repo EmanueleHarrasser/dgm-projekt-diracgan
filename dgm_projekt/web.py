@@ -1,21 +1,29 @@
 import model
 import numpy as np
-from bokeh.plotting import figure, curdoc
+from bokeh.plotting import figure
 from bokeh.layouts import gridplot, column, row
 from bokeh.models import ColumnDataSource, Button, Arrow, NormalHead, Div, Range1d, Spinner, Spacer, Patch
 from bokeh.events import ButtonClick
+from bokeh.application import Application
+from bokeh.server.server import Server
+from bokeh.application.handlers import FunctionHandler
 
 config = {
-    "epochs": 350,
+    "epochs": 500,
     "learning_rate": 0.2,
     "init_theta": 1,
     "init_psi": 1,
     "plot_interval": (-2, 2),
-    "update_interval": 50,
+    "update_interval_ms": 500,
     "gan_params": {
-        "wgan_clip": 0.5 
+        "wgan_clip": 1,
+        "wgp_target": 0.3,
+        "inst_noise_std": 0.7,
+        "gp_reg": 0.3,
+        "co_reg": 1
     }
 }
+train_results = None  
 
 def quiver(self, X, Y, U, V, color, alpha=1):
     for i in range(X.shape[0]):
@@ -42,35 +50,35 @@ def train():
     # WGAN-GP:
     wgan_gp = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
     wgan_gp.set_loss('WGAN')
-    wgan_gp.set_regularization_loss('WGP')
+    wgan_gp.set_regularization_loss('WGP', gamma_gp=config["gan_params"]["wgp_target"])
 
     # IGP:
     igp = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
-    igp.set_instance_noise(True)
+    igp.set_instance_noise(True, config["gan_params"]["inst_noise_std"])
 
     # GP:
     gp = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
-    gp.set_regularization_loss('GP')
+    gp.set_regularization_loss('GP', gamma_gp=config["gan_params"]["gp_reg"])
 
     # CRGP:
     crgp = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
     crgp.set_regularization_loss('CRGP')
 
     # CO:
-    co = model.Model()
-    co.set_regularization_loss('CO')
+    co = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
+    co.set_regularization_loss('CO', gamma_gp=config["gan_params"]["co_reg"])
 
     # DRAGAN:
-    dragan = model.Model()
+    dragan = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
     dragan.set_regularization_loss('DRAGAN')
     dragan.set_instance_noise(True)
 
     # Simple LeCam_Regularization:
-    simple_lecam_reg = model.Model()
+    simple_lecam_reg = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
     simple_lecam_reg.set_regularization_loss('SimpleLeCam')
 
     # LeCam as in paper: "Regularizing Generative Adversarial Networks under Limited Data"
-    lecam_reg = model.Model()
+    lecam_reg = model.Model(iterations=config["epochs"], learning_rate=config["learning_rate"])
     lecam_reg.set_regularization_loss('LeCam')
 
     training_algorithms = [
@@ -84,12 +92,10 @@ def train():
         (co,"Consensus Optimization"),
         (dragan, "DRAGAN Gradient Penalty"),
         (simple_lecam_reg, "LeCam-Distance as regularization"),
-        (lecam_reg, "lecamgan")
+        (lecam_reg, "LeCam GAN")
     ]
-    
-    plots = []
-    sources = {}
-    start_sources = {}
+
+    train_results = {}
     for gan_model, name in training_algorithms:
         init_theta = config["init_theta"]
         init_psi = config["init_psi"]
@@ -98,6 +104,20 @@ def train():
             init_psi = np.clip(init_psi, -clip, clip).item()
         thetas, psis = gan_model.train(init_theta=init_theta, init_psi=init_psi)
         X, Y, U, V = gan_model.get_vectors(interval=config["plot_interval"], steps=15)
+        train_results[name] = (gan_model, thetas, psis, X, Y, U, V) 
+
+    return train_results 
+
+def make_plots(train_results):
+    plots = []
+    sources = {}
+    start_sources = {}
+    for name, (gan_model, thetas, psis, X, Y, U, V) in train_results.items():
+        init_theta = config["init_theta"]
+        init_psi = config["init_psi"]
+        if name == "Wasserstein GAN": 
+            clip = config["gan_params"]["wgan_clip"]
+            init_psi = np.clip(init_psi, -clip, clip).item()
         rmin, rmax = config["plot_interval"]
         x_range = Range1d(rmin, rmax, bounds=(rmin, rmax))
         y_range = Range1d(rmin, rmax, bounds=(rmin, rmax))
@@ -120,51 +140,53 @@ def train():
             clamp = gan_model.clamp
             x_shade = [rmin, rmax, rmax, rmin]
             y_shade = [rmax, rmax, clamp, clamp]
-            p.patch(x_shade, y_shade, color="grey", alpha=0.5, line_width=0)
+            wgan_patch_source_top = ColumnDataSource(data=dict(x=x_shade, y=y_shade))
             x_shade2 = [rmin, rmax, rmax, rmin]
             y_shade2 = [-clamp, -clamp, rmin, rmin]
-            p.patch(x_shade2, y_shade2, color="grey", alpha=0.5, line_width=0)
+            wgan_patch_source_bottom = ColumnDataSource(data=dict(x=x_shade2, y=y_shade2))
 
-            source_start.stream(dict(x=[init_theta], y=[init_psi]), rollover=1)
+            p.patch("x", "y", source=wgan_patch_source_top, color="grey", alpha=0.5, line_width=0)
+            p.patch("x", "y", source=wgan_patch_source_bottom, color="grey", alpha=0.5, line_width=0)
+
+            source_start.data = dict(x=[init_theta], y=[init_psi])
         else:
-            source_start.stream(dict(x=[init_theta], y=[init_psi]), rollover=1)
-
+            source_start.data = dict(x=[init_theta], y=[init_psi])
+            
         sources[name] = (source, thetas, psis)
         start_sources[name] = source_start
         plots.append(p) 
 
-    return plots, sources, start_sources
+    return plots, sources, start_sources, [wgan_patch_source_top, wgan_patch_source_bottom]
 
-def ui(plots, sources, start_sources):
+def ui(doc, plots, sources, start_sources, wgan_patch_sources):
     frame = 0
     paused = False 
     def get_update(sources, start_sources):
         def update():
             nonlocal frame, paused 
-            if paused: return 
+            if paused: return
             reset = False 
             if frame >= config["epochs"]:
                 reset = True 
                 frame = 0 
-                
+            
             for name, source in start_sources.items():
                 init_theta = config["init_theta"]
                 init_psi = config["init_psi"]
                 if name == "Wasserstein GAN":
                     clip = config["gan_params"]["wgan_clip"]
                     init_psi = np.clip(init_psi, -clip, clip).item()
-                source.stream(dict(x=[init_theta], y=[init_psi]), rollover=1)
-
+                source.data = dict(x=[init_theta], y=[init_psi])
+            
             for source, thetas, psis in sources.values():
-                if reset:
-                    source.data = dict(x=[], y=[])
-                source.stream(dict(x=[thetas[frame]], y=[psis[frame]]), rollover=config["epochs"])
-            frame += 1 
+                if reset: source.data = dict(x=[], y=[])
+                else: source.stream(dict(x=[thetas[frame]], y=[psis[frame]]), rollover=config["epochs"])
+            if not reset: frame += 1 
         return update 
-
+    
     grid = gridplot(plots, ncols=3, width=300, height=300, toolbar_options=dict(logo=None))
     frame = 0
-    curdoc().add_periodic_callback(get_update(sources, start_sources), config["update_interval"])
+    doc.add_periodic_callback(get_update(sources, start_sources), config["update_interval_ms"])
 
     # Buttons & final layout 
     header = Div(text="<h1>DiracGAN</h1>")
@@ -175,12 +197,21 @@ def ui(plots, sources, start_sources):
     pause_btn = Button(label="Pause Animation")
     skip_to_end_btn = Button(label="Skip to end") 
 
-    def reset(sources):
+    def reset(sources, start_sources):
         def reset_action(_):
             nonlocal frame 
             frame = 0
             for source, _, _ in sources.values():
                 source.data = dict(x=[], y=[])
+
+            for name, source in start_sources.items():
+                init_theta = config["init_theta"]
+                init_psi = config["init_psi"]
+                if name == "Wasserstein GAN":
+                    clip = config["gan_params"]["wgan_clip"]
+                    init_psi = np.clip(init_psi, -clip, clip).item()
+                source.data = dict(x=[init_theta], y=[init_psi])
+
         return reset_action
 
     def toggle_paused(): 
@@ -196,10 +227,17 @@ def ui(plots, sources, start_sources):
             if not paused: toggle_paused()(_) 
             for source, thetas, psis in sources.values():
                 source.data = dict(x=thetas, y=psis)
-                frame = config["epochs"]
+            for name, source in start_sources.items():
+                init_theta = config["init_theta"]
+                init_psi = config["init_psi"]
+                if name == "Wasserstein GAN":
+                    clip = config["gan_params"]["wgan_clip"]
+                    init_psi = np.clip(init_psi, -clip, clip).item()
+                source.data = dict(x=[init_theta], y=[init_psi])
+            frame = config["epochs"]
         return skip_to_end_action
 
-    reset_btn.on_event(ButtonClick, reset(sources))
+    reset_btn.on_event(ButtonClick, reset(sources, start_sources))
     pause_btn.on_event(ButtonClick, toggle_paused())
     skip_to_end_btn.on_event(ButtonClick, skip_to_end(sources))
     anim_buttons = row(reset_btn, pause_btn, skip_to_end_btn)
@@ -212,37 +250,86 @@ def ui(plots, sources, start_sources):
     spinner_start_x = Spinner(title="Initial θ", low=rmin, high=rmax, step=0.01, value=config["init_theta"])
     spinner_start_y = Spinner(title="Initital Ψ", low=rmin, high=rmax, step=0.01, value=config["init_psi"])
     spinner_wgan_clip = Spinner(title="WGAN Clip", low=rmin, high=rmax, step=0.01, value=config["gan_params"]["wgan_clip"])
+    spinner_wgp_reg  = Spinner(title="WGP Reg", low=0, high=1, step=0.01, value=config["gan_params"]["wgp_target"])
+    spinner_inst_noise_std = Spinner(title="Inst. Noise STD", low=0, high=1, step=0.01, value=config["gan_params"]["inst_noise_std"])
+    spinner_gp_reg  = Spinner(title="GP Reg", low=0, high=1, step=0.01, value=config["gan_params"]["gp_reg"])
+    spinner_co_reg = Spinner(title="CO Reg", low=0, high=1, step=0.01, value=config["gan_params"]["co_reg"])
 
     def retrain(): 
         def retrain_action(_):
+            global train_results
             nonlocal sources 
             config["epochs"] = spinner_epochs.value 
             config["learning_rate"] = spinner_lr.value 
             config["init_theta"] = spinner_start_x.value             
             config["init_psi"] = spinner_start_y.value     
-            config["gan_params"]["wgan_clip"] = spinner_wgan_clip.value 
-            _, new_sources, _ = train() 
+            config["gan_params"]["wgan_clip"] = spinner_wgan_clip.value
+            config["gan_params"]["wgp_target"] = spinner_wgp_reg.value
+            config["gan_params"]["inst_noise_std"] = spinner_inst_noise_std.value
+            config["gan_params"]["gp_reg"] = spinner_gp_reg.value
+            config["gan_params"]["co_reg"] = spinner_co_reg.value
+
+            train_results = train() 
             for name, _ in sources.items():
-                sources[name] = (sources[name][0], new_sources[name][1], new_sources[name][2])
-            reset(sources)(_) 
+                sources[name] = (sources[name][0], train_results[name][1], train_results[name][2])
+            
+            # update wgan patch 
+            wpst, wpsb = wgan_patch_sources
+            clamp = train_results["Wasserstein GAN"][0].clamp
+            x_shade = [rmin, rmax, rmax, rmin]
+            y_shade = [rmax, rmax, clamp, clamp]
+            wpst.data = dict(x=x_shade, y=y_shade)
+            x_shade2 = [rmin, rmax, rmax, rmin]
+            y_shade2 = [-clamp, -clamp, rmin, rmin]
+            wpsb.data = dict(x=x_shade2, y=y_shade2)
+
+            reset(sources, start_sources)(_) 
 
         return retrain_action
     
     retrain_button.on_event(ButtonClick, retrain()) 
-    param_buttons = column(column(row(spinner_epochs, spinner_lr), 
+    param_buttons = column(column(Div(text="<h3>General</h3>"),
+                                  row(spinner_epochs, spinner_lr), 
                                   row(spinner_start_x, spinner_start_y)),
-                                  row(spinner_wgan_clip), 
+                                  Div(text="<h3>Methods</h3>"),
+                                  row(spinner_wgan_clip),
+                                  row(spinner_wgp_reg),
+                                  row(spinner_inst_noise_std),
+                                  row(spinner_gp_reg),
+                                  row(spinner_co_reg),
                                   retrain_button) 
 
     all_controls = column(anim_controls, anim_buttons, param_controls, param_buttons) 
 
     layout = column(header, row(grid, Spacer(width=25), all_controls), footer)
-    return layout 
+    return layout
+
+def make_document(doc):
+    while train_results is None: continue 
+    plots, sources, start_sources, wgan_patch_sources = make_plots(train_results)
+    root = ui(doc, plots, sources, start_sources, wgan_patch_sources)
+    doc.add_root(root)
+    doc.set_title("DiracGAN")
 
 def setup():
-    plots, sources, start_sources = train() 
-    root = ui(plots, sources, start_sources)
-    curdoc().add_root(root) 
-    curdoc().set_title("DiracGAN")
+    global train_results 
+    print("Training models...")
+    train_results = train() 
+    print("Training finished.")
+    print("Starting server...")
 
-setup() 
+    app = Application(FunctionHandler(make_document))
+    server = Server({'/': app})
+    server.start()
+    server.io_loop.add_callback(server.show, "/")
+    server.io_loop.add_callback(lambda: print(f"Server running on http://{'localhost' if server.address is None else server.address}:{server.port}"))
+    server.io_loop.add_callback(lambda: print(f"Press CTRL + C to quit."))
+    try:
+        server.io_loop.start()
+    except KeyboardInterrupt:
+        server.io_loop.stop()
+        server.stop()
+        print("Quitting...")
+
+if __name__ in "__main__": 
+    setup() 

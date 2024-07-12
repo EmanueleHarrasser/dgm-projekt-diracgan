@@ -5,6 +5,7 @@ import losses
 from regularizations import get_regularization
 import numpy as np 
 import random
+torch.manual_seed(42)
 
 class Discriminator(nn.Module):
     def __init__(self):
@@ -59,6 +60,7 @@ class Model(object):
         self.clamp = 0
         self.gamma = 0
         self.instance_noise = False
+        self.instance_noise_std = 0.5
         self.moving_average = False
         self.ema_gen = None
         self.ema_real = None
@@ -75,21 +77,21 @@ class Model(object):
     def set_loss(self,loss_type, clamp=0.5):
         self.loss_type = loss_type
         if loss_type in ['WGAN']:
-            self.n_d = 5
+            self.n_d = 1#5
             self.clamp = clamp
         else:
             self.n_d = 1
             self.clamp = 0
     
-    def set_regularization_loss(self, regularization_loss):
+    def set_regularization_loss(self, regularization_loss, gamma_gp=0.5, gamma_default=0):
         self.regularization_loss = regularization_loss
 
         if regularization_loss in ['CRGP']:
-            self.gamma = 1 
+            self.gamma = 1
         elif regularization_loss != '':
-            self.gamma = 0.5 
+            self.gamma = gamma_gp
         else:
-            self.gamma = 0
+            self.gamma = gamma_default
 
         # Turn on moving average if needed
         if regularization_loss in ['LeCam']:
@@ -99,8 +101,9 @@ class Model(object):
             self.ema_gen = None
             self.ema_real = None
             
-    def set_instance_noise(self,instance_noise):
+    def set_instance_noise(self,instance_noise, std=0.5):
         self.instance_noise = instance_noise
+        self.instance_noise_std = std
 
     def get_vectors(self, interval=(-2, 2), steps=10):
         real_pred = 0 
@@ -134,7 +137,9 @@ class Model(object):
                 self.reset_gradients()            
                 
                 real_samples = torch.zeros(1)# create samples (so we can use them for the regularization loss)
-                
+                if self.instance_noise:
+                    real_samples += torch.normal(mean=0., std=self.instance_noise_std, size=tuple([1])) # add instance noise
+
                 real_samples.requires_grad = True 
 
                 real_pred = self.discriminator.forward(torch.FloatTensor(real_samples)) #forward propagate discriminator with real function output
@@ -162,8 +167,10 @@ class Model(object):
 
                 discriminator_gradient = self.discriminator.linear.weight.grad.item()
 
-                U[i, j] = -generator_gradient * self.generator_optimizer.param_groups[-1]["lr"]
-                V[i, j] = -discriminator_gradient * self.discriminator_optimizer.param_groups[-1]["lr"]
+                theta = -generator_gradient
+                psi = -discriminator_gradient 
+                U[i, j] = theta * self.generator_optimizer.param_groups[-1]["lr"]
+                V[i, j] = psi * self.discriminator_optimizer.param_groups[-1]["lr"]
                 
         return X, Y, U, V
 
@@ -193,7 +200,7 @@ class Model(object):
                     if self.random_parameter_reset == True:
                         if random.randrange(0,1000) > self.parameter_reset_probability*1000:
                             generator_loss = generator_loss * 0
-                    generator_loss.backward() #backward propagate to get gradients
+                    generator_loss.backward() #backward propagate to get gradient
 
                     self.generator_optimizer.step() #walk in gradient direction
         
@@ -201,9 +208,8 @@ class Model(object):
                 self.discriminator_optimizer.zero_grad()#reset gradients
 
                 real_samples = torch.zeros(1)# create samples (so we can use them for the regularization loss)
-                
                 if self.instance_noise:
-                    real_samples += torch.normal(mean=0., std=0.5, size=tuple([1])) # add instance noise
+                    real_samples += torch.normal(mean=0., std=self.instance_noise_std, size=tuple([1])) # add instance noise
 
                 real_samples.requires_grad = True 
                 
